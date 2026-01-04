@@ -5,7 +5,7 @@ import os
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 
-# --- CONFIGURAÇÕES DE PESQUISA ---
+# --- CONFIGURAÇÕES DE PESQUISA (Junho/2026) ---
 ORIGEM, DESTINO = "GRU", "LHR"
 JANELA_INICIO = datetime(2026, 6, 1)
 JANELA_FIM = datetime(2026, 6, 10)
@@ -27,7 +27,7 @@ def obter_token():
 def buscar_passagens():
     token = obter_token()
     headers = {"Authorization": f"Bearer {token}"}
-    melhor_geral, melhor_latam = None, None
+    todos_os_voos = []
 
     data_atual = JANELA_INICIO
     while data_atual <= JANELA_FIM:
@@ -43,52 +43,47 @@ def buscar_passagens():
         if res.status_code == 200:
             offers = res.json().get('data', [])
             for offer in offers:
-                preco = float(offer['price']['total'])
-                cia = offer['validatingAirlineCodes'][0]
-                if cia in ['LA', 'JJ']:
-                    if not melhor_latam or preco < float(melhor_latam['price']['total']): melhor_latam = offer
-                if not melhor_geral or preco < float(melhor_geral['price']['total']): melhor_geral = offer
+                todos_os_voos.append(offer)
+        
         data_atual += timedelta(days=1)
-    return melhor_geral, melhor_latam
+    
+    # Ordena todos os voos encontrados pelo preço e pega os 3 primeiros
+    todos_os_voos.sort(key=lambda x: float(x['price']['total']))
+    return todos_os_voos[:3]
 
-def formatar_voo(voo, titulo):
-    if not voo: return f"--- {titulo} ---\nNenhum voo direto encontrado.\n\n"
+def formatar_voo(voo, rank):
+    if not voo: return ""
     
     preco = voo['price']['total']
-    # Extração de detalhes técnicos para busca manual segura
-    itinerario_ida = voo['itineraries'][0]['segments'][0]
-    itinerario_volta = voo['itineraries'][1]['segments'][0]
+    cia = voo['validatingAirlineCodes'][0]
+    it_ida = voo['itineraries'][0]['segments'][0]
+    it_volta = voo['itineraries'][1]['segments'][0]
     
-    num_voo_ida = f"{itinerario_ida['carrierCode']}{itinerario_ida['number']}"
-    hora_ida = itinerario_ida['departure']['at'].replace('T', ' às ')
+    num_ida, hora_ida = f"{it_ida['carrierCode']}{it_ida['number']}", it_ida['departure']['at'].replace('T', ' às ')
+    num_volta, hora_volta = f"{it_volta['carrierCode']}{it_volta['number']}", it_volta['departure']['at'].replace('T', ' às ')
     
-    num_voo_volta = f"{itinerario_volta['carrierCode']}{itinerario_volta['number']}"
-    hora_volta = itinerario_volta['departure']['at'].replace('T', ' às ')
-
-    d_ida = itinerario_ida['departure']['at'][:10]
-    d_volta = itinerario_volta['departure']['at'][:10]
+    d_ida, d_volta = it_ida['departure']['at'][:10], it_volta['departure']['at'][:10]
     
-    # Links robustos
     link_latam = f"https://www.latamairlines.com/br/pt/ofertas-voos?origin={ORIGEM}&destination={DESTINO}&outbound={d_ida}&inbound={d_volta}&adults=2&trip=RT&cabin=economy"
     link_google = f"https://www.google.com/travel/flights?q=Flights%20from%20{ORIGEM}%20to%20{DESTINO}%20on%20{d_ida}%20through%20{d_volta}%20nonstop"
 
     return f"""
---- {titulo} ---
-💰 PREÇO TOTAL (2 pessoas): R$ {preco}
-✈️ IDA: Voo {num_voo_ida} | Partida: {hora_ida}
-✈️ VOLTA: Voo {num_voo_volta} | Partida: {hora_volta}
-
-🔗 LINK LATAM: {link_latam}
-🔗 BUSCA GOOGLE: {link_google}
+🏆 {rank}º MENOR PREÇO: R$ {preco}
+Companhia: {cia} {'(PREFERENCIAL)' if cia in ['LA', 'JJ'] else ''}
+✈️ Voo Ida: {num_ida} ({hora_ida})
+✈️ Voo Volta: {num_volta} ({hora_volta})
+🔗 Link LATAM: {link_latam}
+🔗 Google Flights: {link_google}
+--------------------------------------------
 """
 
-def enviar_email(geral, latam):
-    corpo = "✈️ RELATÓRIO DE VOOS DIRETOS - LONDRES JUNHO 2026\n\n"
-    corpo += formatar_voo(latam, "OPÇÃO PRIORITÁRIA LATAM")
-    corpo += formatar_voo(geral, "OPÇÃO MAIS BARATA (GERAL)")
+def enviar_email(top_voos):
+    corpo = "✈️ TOP 3 MELHORES PREÇOS - LONDRES (10 DIAS) JUNHO/2026\n\n"
+    for i, voo in enumerate(top_voos):
+        corpo += formatar_voo(voo, i+1)
     
     msg = MIMEText(corpo)
-    msg['Subject'] = f"✈️ Alerta: Londres Junho (10 dias)"
+    msg['Subject'] = f"✈️ TOP 3 ALERTAS: Londres desde R$ {top_voos[0]['price']['total'] if top_voos else 'N/A'}"
     msg['From'], msg['To'] = EMAIL_USER, EMAIL_USER
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
@@ -96,5 +91,6 @@ def enviar_email(geral, latam):
         server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
 
 if __name__ == "__main__":
-    geral, latam = buscar_passagens()
-    if geral or latam: enviar_email(geral, latam)
+    melhores = buscar_passagens()
+    if melhores:
+        enviar_email(melhores)
