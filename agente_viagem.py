@@ -11,6 +11,7 @@ JANELA_INICIO = datetime(2026, 6, 1)
 JANELA_FIM = datetime(2026, 6, 10)
 DURACAO_VIAGEM = 10 
 
+# --- CREDENCIAIS ---
 AMADEUS_KEY = os.getenv('AMADEUS_KEY')
 AMADEUS_SECRET = os.getenv('AMADEUS_SECRET')
 EMAIL_USER = os.getenv('EMAIL_USER')
@@ -27,7 +28,7 @@ def obter_token():
 def buscar_passagens():
     token = obter_token()
     headers = {"Authorization": f"Bearer {token}"}
-    todos_os_voos = []
+    pilha_de_resultados = [] # Aqui guardaremos ABSOLUTAMENTE TUDO o que encontrarmos
 
     data_atual = JANELA_INICIO
     while data_atual <= JANELA_FIM:
@@ -35,21 +36,22 @@ def buscar_passagens():
         d_volta = (data_atual + timedelta(days=DURACAO_VIAGEM)).strftime('%Y-%m-%d')
         
         url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+        # Buscamos até 50 voos por dia para não perder nada
         params = {"originLocationCode": ORIGEM, "destinationLocationCode": DESTINO,
                   "departureDate": d_ida, "returnDate": d_volta,
-                  "adults": 2, "nonStop": "true", "currencyCode": "BRL", "max": 10}
+                  "adults": 2, "nonStop": "true", "currencyCode": "BRL", "max": 50}
         
         res = requests.get(url, headers=headers, params=params)
         if res.status_code == 200:
             offers = res.json().get('data', [])
             for offer in offers:
-                todos_os_voos.append(offer)
+                pilha_de_resultados.append(offer) # Adiciona cada voo na pilha única
         
         data_atual += timedelta(days=1)
     
-    # Ordena todos os voos encontrados pelo preço e pega os 3 primeiros
-    todos_os_voos.sort(key=lambda x: float(x['price']['total']))
-    return todos_os_voos[:3]
+    # AGORA SIM: Ordenamos a pilha inteira pelo preço e pegamos os 3 melhores do período
+    pilha_de_resultados.sort(key=lambda x: float(x['price']['total']))
+    return pilha_de_resultados[:3]
 
 def formatar_voo(voo, rank):
     if not voo: return ""
@@ -68,29 +70,14 @@ def formatar_voo(voo, rank):
     link_google = f"https://www.google.com/travel/flights?q=Flights%20from%20{ORIGEM}%20to%20{DESTINO}%20on%20{d_ida}%20through%20{d_volta}%20nonstop"
 
     return f"""
-🏆 {rank}º MENOR PREÇO: R$ {preco}
+🏆 {rank}º MELHOR PREÇO DO PERÍODO: R$ {preco}
 Companhia: {cia} {'(PREFERENCIAL)' if cia in ['LA', 'JJ'] else ''}
-✈️ Voo Ida: {num_ida} ({hora_ida})
-✈️ Voo Volta: {num_volta} ({hora_volta})
-🔗 Link LATAM: {link_latam}
-🔗 Google Flights: {link_google}
+✈️ IDA: {num_ida} ({hora_ida})
+✈️ VOLTA: {num_volta} ({hora_volta})
+🔗 LINK LATAM: {link_latam}
+🔗 GOOGLE FLIGHTS: {link_google}
 --------------------------------------------
 """
 
 def enviar_email(top_voos):
-    corpo = "✈️ TOP 3 MELHORES PREÇOS - LONDRES (10 DIAS) JUNHO/2026\n\n"
-    for i, voo in enumerate(top_voos):
-        corpo += formatar_voo(voo, i+1)
-    
-    msg = MIMEText(corpo)
-    msg['Subject'] = f"✈️ TOP 3 ALERTAS: Londres desde R$ {top_voos[0]['price']['total'] if top_voos else 'N/A'}"
-    msg['From'], msg['To'] = EMAIL_USER, EMAIL_USER
-
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, EMAIL_USER, msg.as_string())
-
-if __name__ == "__main__":
-    melhores = buscar_passagens()
-    if melhores:
-        enviar_email(melhores)
+    corpo = "✈️ OS
