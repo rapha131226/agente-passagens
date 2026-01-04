@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 ORIGEM = "GRU"
 DESTINO = "LHR"
 JANELA_INICIO = datetime(2026, 6, 1)
-JANELA_FIM = datetime(2026, 6, 10) # Pesquisa ida até dia 10
-DURACAO_VIAGEM = 10 # Viagem de 10 dias exatos
+JANELA_FIM = datetime(2026, 6, 10)
+DURACAO_VIAGEM = 10 # Viagem de 10 dias
 
 # --- CREDENCIAIS ---
 AMADEUS_KEY = os.getenv('AMADEUS_KEY')
@@ -32,9 +32,7 @@ def obter_token():
 def buscar_passagens():
     token = obter_token()
     headers = {"Authorization": f"Bearer {token}"}
-    
-    melhor_geral = None
-    melhor_latam = None
+    melhor_geral, melhor_latam = None, None
 
     data_atual = JANELA_INICIO
     while data_atual <= JANELA_FIM:
@@ -45,7 +43,7 @@ def buscar_passagens():
         params = {
             "originLocationCode": ORIGEM, "destinationLocationCode": DESTINO,
             "departureDate": data_ida, "returnDate": data_volta,
-            "adults": 2, "nonStop": "true", # Apenas voos diretos
+            "adults": 2, "nonStop": "true", # Somente voos diretos
             "currencyCode": "BRL", "max": 50
         }
         
@@ -56,14 +54,12 @@ def buscar_passagens():
                 preco = float(offer['price']['total'])
                 cia = offer['validatingAirlineCodes'][0]
                 
-                # Lógica: Armazenar a melhor da LATAM e a melhor Geral
-                if cia == 'LA' or cia == 'JJ': # LATAM Codes
+                # Armazena a melhor da LATAM (LA/JJ) e a melhor Geral
+                if cia in ['LA', 'JJ']:
                     if not melhor_latam or preco < float(melhor_latam['price']['total']):
                         melhor_latam = offer
-                
                 if not melhor_geral or preco < float(melhor_geral['price']['total']):
                     melhor_geral = offer
-        
         data_atual += timedelta(days=1)
     return melhor_geral, melhor_latam
 
@@ -72,27 +68,32 @@ def formatar_voo(voo, titulo):
     
     preco = voo['price']['total']
     cia = voo['validatingAirlineCodes'][0]
-    data_ida = voo['itineraries'][0]['segments'][0]['departure']['at']
-    data_volta = voo['itineraries'][1]['segments'][0]['departure']['at']
+    data_ida = voo['itineraries'][0]['segments'][0]['departure']['at'][:10]
+    data_volta = voo['itineraries'][1]['segments'][0]['departure']['at'][:10]
     
-    # Criar link do Google Flights para facilitar a sua vida
-    link = f"https://www.google.com/travel/flights?q=from:GRU;to:LHR;at:{data_ida[:10]};rt:{data_volta[:10]};nonstop:true"
+    # Construção do link dinâmico da LATAM ou Google Flights
+    if cia in ['LA', 'JJ']:
+        # Link Direto LATAM (Busca configurada para 2 adultos, ida e volta)
+        link = f"https://www.latamairlines.com/br/pt/ofertas-voos?origin={ORIGEM}&destination={DESTINO}&outbound={data_ida}T12%3A00%3A00.000Z&inbound={data_volta}T12%3A00%3A00.000Z&adults=2&trip=RT&cabin=economy"
+    else:
+        # Link Google Flights para outras companhias
+        link = f"https://www.google.com/travel/flights?q=from:GRU;to:LHR;at:{data_ida};rt:{data_volta};nonstop:true"
     
     return f"""
 --- {titulo} ---
 Companhia: {cia}
 Preço Total (2 pessoas): R$ {preco}
-Datas: {data_ida[:10]} até {data_volta[:10]}
-Link Google Flights: {link}
+Datas: {data_ida} até {data_volta}
+Link de Compra: {link}
 """
 
 def enviar_email(geral, latam):
-    corpo = "✈️ RELATÓRIO DIÁRIO DE PASSAGENS - LONDRES JUNHO/2026\n\n"
+    corpo = "✈️ RELATÓRIO DE PASSAGENS DIRETAS - LONDRES 2026\n\n"
     corpo += formatar_voo(latam, "OPÇÃO PREFERENCIAL LATAM")
     corpo += formatar_voo(geral, "OPÇÃO MAIS BARATA (GERAL)")
     
     msg = MIMEText(corpo)
-    msg['Subject'] = f"✈️ Alerta: Londres Junho/2026 (10 dias)"
+    msg['Subject'] = f"✈️ Alerta de Preço: Londres Junho (10 dias)"
     msg['From'], msg['To'] = EMAIL_USER, EMAIL_USER
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
