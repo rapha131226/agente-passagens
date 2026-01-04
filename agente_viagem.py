@@ -25,8 +25,14 @@ def obter_token():
         "client_secret": AMADEUS_SECRET
     }
     response = requests.post(url, data=data)
+    
+    # Se a Amadeus recusar, este comando vai imprimir o motivo real no log
+    if response.status_code != 200:
+        print(f"ERRO DA AMADEUS: {response.text}")
+        exit(1)
+        
     return response.json()['access_token']
-
+    
 def buscar_passagens():
     token = obter_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -93,4 +99,5 @@ def enviar_email(voo):
 if __name__ == "__main__":
     resultado = buscar_passagens()
     if resultado:
+
         enviar_email(resultado)
